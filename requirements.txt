@@ -1,0 +1,41 @@
+# ==============================================
+# REQUIREMENTS FOR TIPVOS BUSINESS INTELLIGENCE
+# ==============================================
+
+# Core data processing
+pandas==2.1.4
+numpy==1.26.3
+python-dateutil==2.8.2
+pytz==2023.3.post1
+
+# Database connectivity
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+
+# Machine Learning & Data Mining
+scikit-learn==1.3.2
+xgboost==2.0.3
+mlxtend==0.23.1  # For association rules
+
+# Time Series Analysis
+statsmodels==0.14.1
+pmdarima==2.0.4
+
+# Clustering & Segmentation
+threadpoolctl==3.2.0  # Required for scikit-learn
+
+# Data Visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+plotly==5.18.0  # Optional for interactive visuals
+
+# Utilities
+tqdm==4.66.1
+python-dotenv==1.0.0
+jupyter==1.0.0  # For notebook environments
+ipykernel==6.27.1  # For Jupyter integration
+
+# Optional for production
+pyarrow==14.0.2  # Better pandas performance
+fastapi==0.109.1  # If creating APIs
+uvicorn==0.27.0  # For API serving
