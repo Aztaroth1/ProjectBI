@@ -16,34 +16,58 @@ MIN_PRODUCTOS_PREDICCION = 5  # Mínimo número de productos a predecir
 
 # Parámetros para reglas de asociación
 MIN_SUPPORT = 0.01  # Soporte mínimo para itemsets frecuentes
-MIN_LIFT = 1.0     # Lift mínimo para reglas de asociación
+MIN_LIFT = 1.0      # Lift mínimo para reglas de asociación
 
-# --- CONEXIÓN A SUPABASE ---
-engine = create_engine("postgresql://postgres.wrwpkkyeukjuisjlbihn:postgres@aws-0-us-east-2.pooler.supabase.com:6543/postgres")
+# --- Detalles de conexión a tu base de datos PostgreSQL local ---
+db_user = 'postgres'
+db_password = 'postgres'
+db_host = 'localhost'
+db_port = '5433'
+db_name = 'Tipvos' # Nombre de la base de datos
+
+# Construir la cadena de conexión para PostgreSQL local
+engine_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+engine = create_engine(engine_string)
+
+print("=== INICIANDO SISTEMA DE PREDICCIÓN Y ANÁLISIS (TIPVOS) ===")
+print(f"📅 Fecha de ejecución: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # --- CARGA DE DATOS ---
-df_ventas = pd.read_sql("SELECT * FROM fact_ventas", engine)
-df_ventas['fecha'] = pd.to_datetime(df_ventas['fecha'])
-df_ventas = df_ventas[(df_ventas['cantidad'] > 0) & (df_ventas['precio_unitario'] > 0)]
-df_ventas['monto_venta'] = df_ventas['cantidad'] * df_ventas['precio_unitario']
-df_ventas['año_mes'] = df_ventas['fecha'].dt.to_period('M')
+print("\n--- Cargando Datos Históricos desde PostgreSQL Local ---")
+try:
+    df_ventas = pd.read_sql("SELECT * FROM fact_ventas", engine)
+    df_ventas['fecha'] = pd.to_datetime(df_ventas['fecha'])
+    df_ventas = df_ventas[(df_ventas['cantidad'] > 0) & (df_ventas['precio_unitario'] > 0)]
+    df_ventas['monto_venta'] = df_ventas['cantidad'] * df_ventas['precio_unitario']
+    df_ventas['año_mes'] = df_ventas['fecha'].dt.to_period('M')
 
-# Agrupación mensual por producto
-df_mensual_productos = df_ventas.groupby(['stockcode', 'año_mes'])['cantidad'].sum().reset_index()
-df_mensual_productos['año_mes'] = df_mensual_productos['año_mes'].dt.to_timestamp()
+    print(f"✅ Datos de ventas cargados: {len(df_ventas)} registros")
 
-# Obtener top productos por cantidad total (para predicciones alternativas)
-top_productos_por_cantidad = df_ventas.groupby('stockcode')['cantidad'].sum().nlargest(30).index.tolist()
+    # Agrupación mensual por producto
+    df_mensual_productos = df_ventas.groupby(['stockcode', 'año_mes'])['cantidad'].sum().reset_index()
+    df_mensual_productos['año_mes'] = df_mensual_productos['año_mes'].dt.to_timestamp()
+    print(f"✅ Datos mensuales por producto preparados.")
 
-# Agrupación mensual por cliente (para montos)
-df_mensual_clientes = df_ventas.groupby(['customer_id', 'año_mes'])['monto_venta'].sum().reset_index()
-df_mensual_clientes['año_mes'] = df_mensual_clientes['año_mes'].dt.to_timestamp()
+    # Obtener top productos por cantidad total (para predicciones alternativas)
+    top_productos_por_cantidad = df_ventas.groupby('stockcode')['cantidad'].sum().nlargest(30).index.tolist()
+    print(f"✅ Top productos por cantidad identificados.")
 
-# Obtener top clientes por monto total (para predicciones alternativas)
-top_clientes_por_monto = df_ventas.groupby('customer_id')['monto_venta'].sum().nlargest(20).index.tolist()
+    # Agrupación mensual por cliente (para montos)
+    df_mensual_clientes = df_ventas.groupby(['customer_id', 'año_mes'])['monto_venta'].sum().reset_index()
+    df_mensual_clientes['año_mes'] = df_mensual_clientes['año_mes'].dt.to_timestamp()
+    print(f"✅ Datos mensuales por cliente preparados.")
+
+    # Obtener top clientes por monto total (para predicciones alternativas)
+    top_clientes_por_monto = df_ventas.groupby('customer_id')['monto_venta'].sum().nlargest(20).index.tolist()
+    print(f"✅ Top clientes por monto identificados.")
+
+except Exception as e:
+    print(f"❌ Error al cargar o preparar datos históricos: {e}")
+    print("Asegúrate de que la base de datos PostgreSQL local esté accesible y la tabla 'fact_ventas' exista.")
+    raise # Detener la ejecución si los datos no se pueden cargar
 
 # --- SELECCIÓN DE TIPO DE PREDICCIÓN ---
-print("=== SELECTOR DE PREDICCIONES ===")
+print("\n=== SELECTOR DE PREDICCIONES ===")
 print("Selecciona qué tipo de predicción/análisis deseas realizar:")
 print("1. Solo predicciones de productos (cantidades)")
 print("2. Solo predicciones de clientes (montos)")
@@ -83,34 +107,42 @@ print(f"💾 Modo de inserción: LIMPIAR FUTURAS (automático)")
 
 input("\nPresiona Enter para continuar...")
 
+
 # --- LIMPIAR DATOS FUTUROS (AUTOMÁTICO) ---
-print("\n--- Limpiando Predicciones Futuras ---")
-fecha_actual = '2011-12-01'
+print("\n--- Limpiando Predicciones Futuras en PostgreSQL Local ---")
+# Usar la fecha fija para la demo
+fecha_referencia_demo = datetime(2011, 12, 1).date()
 
 with engine.begin() as conn:
     if realizar_productos:
-        result = conn.execute(text("DELETE FROM predicciones_mensuales WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_actual})
-        print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de productos")
+        try:
+            result = conn.execute(text("DELETE FROM predicciones_mensuales WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_referencia_demo})
+            print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de productos.")
+        except Exception as e:
+            print(f"❌ Error al limpiar 'predicciones_mensuales': {e}. Asegúrate de que la tabla existe.")
     
     if realizar_clientes:
-        result = conn.execute(text("DELETE FROM predicciones_montos_clientes WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_actual})
-        print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de clientes")
+        try:
+            result = conn.execute(text("DELETE FROM predicciones_montos_clientes WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_referencia_demo})
+            print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de clientes.")
+        except Exception as e:
+            print(f"❌ Error al limpiar 'predicciones_montos_clientes': {e}. Asegúrate de que la tabla existe.")
     
     if realizar_asociaciones:
         try:
-            result = conn.execute(text("DELETE FROM reglas_asociacion WHERE fecha_generacion >= :fecha"), {"fecha": fecha_actual})
-            print(f"🧹 Eliminadas {result.rowcount} reglas de asociación anteriores")
+            result = conn.execute(text("DELETE FROM reglas_asociacion WHERE fecha_generacion >= :fecha"), {"fecha": fecha_referencia_demo})
+            print(f"🧹 Eliminadas {result.rowcount} reglas de asociación anteriores.")
         except Exception as e:
-            print(f"ℹ️ No se pudo limpiar reglas de asociación: {e}")
+            print(f"ℹ️ No se pudo limpiar 'reglas_asociacion': {e}. Asegúrate de que la tabla existe.")
     
     if realizar_clustering:
         try:
-            result = conn.execute(text("DELETE FROM segmentacion_clientes WHERE fecha_actualizacion >= :fecha"), {"fecha": fecha_actual})
-            print(f"🧹 Eliminadas {result.rowcount} segmentaciones anteriores")
+            result = conn.execute(text("DELETE FROM segmentacion_clientes WHERE fecha_actualizacion >= :fecha"), {"fecha": fecha_referencia_demo})
+            print(f"🧹 Eliminadas {result.rowcount} segmentaciones anteriores.")
         except Exception as e:
-            print(f"ℹ️ No se pudo limpiar segmentaciones: {e}")
+            print(f"ℹ️ No se pudo limpiar 'segmentacion_clientes': {e}. Asegúrate de que la tabla existe.")
 
-print("\n=== INICIANDO PREDICCIONES ===")
+print("\n=== INICIANDO PREDICCIONES Y ANÁLISIS ===")
 
 # --- 1. PREDICCIONES DE PRODUCTOS (CANTIDADES) ---
 if realizar_productos:
@@ -264,7 +296,7 @@ if realizar_clientes:
     # Segundo: Si no tenemos suficientes clientes, agregar predicciones con promedio histórico
     if len(clientes_con_modelo) < MIN_CLIENTES_PREDICCION:
         clientes_faltantes = MIN_CLIENTES_PREDICCION - len(clientes_con_modelo)
-        print(f"\n⚠️ Solo se encontraron {len(clientes_con_modelo)} modelos de clientes.")
+        print(f"\n⚠️ Sólo se encontraron {len(clientes_con_modelo)} modelos de clientes.")
         print(f"Agregando {clientes_faltantes} predicciones adicionales usando promedio histórico...")
         
         # Seleccionar clientes adicionales de los top clientes que no tengan modelo
@@ -330,14 +362,15 @@ if realizar_asociaciones:
             print(f"✅ Modelo cargado: {len(rules)} reglas encontradas")
             
         else:
-            print("🔧 Generando nuevas reglas de asociación...")
+            print("🔧 Generando nuevas reglas de asociación (no se encontró modelo pre-entrenado)...")
             
             # Cargar información de productos para descripciones
             try:
                 df_productos = pd.read_sql("SELECT stockcode, descripcion FROM dim_producto", engine)
-            except:
-                df_productos = pd.DataFrame({'stockcode': df_ventas['stockcode'].unique(), 
-                                           'descripcion': df_ventas['stockcode'].unique()})
+            except Exception as e:
+                print(f"⚠️ No se pudo cargar dim_producto: {e}. Usando stockcode como descripción.")
+                df_productos = pd.DataFrame({'stockcode': df_ventas['stockcode'].unique(),
+                                             'descripcion': df_ventas['stockcode'].unique()})
             
             # Preparar transacciones
             print("   Preparando transacciones...")
@@ -347,7 +380,7 @@ if realizar_asociaciones:
             print(f"   Transacciones con 2+ productos: {len(transactions_filtered)}")
             
             if len(transactions_filtered) < 100:
-                print("⚠️ Muy pocas transacciones para análisis de asociación")
+                print("⚠️ Muy pocas transacciones para análisis de asociación. Se necesitan al menos 100.")
                 rules = pd.DataFrame()
             else:
                 # Codificar transacciones
@@ -370,19 +403,19 @@ if realizar_asociaciones:
                         rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
                         rules = rules.sort_values(['lift', 'confidence'], ascending=[False, False])
                         
-                        print(f"✅ {len(rules)} reglas de asociación generadas")
+                        print(f"✅ {len(rules)} reglas de asociación generadas.")
                     else:
-                        print("⚠️ No se generaron reglas de asociación")
+                        print("⚠️ No se generaron reglas de asociación con los parámetros actuales.")
                         rules = pd.DataFrame()
                 else:
-                    print("⚠️ No hay suficientes itemsets frecuentes")
+                    print("⚠️ No hay suficientes itemsets frecuentes para generar reglas con el min_support definido.")
                     rules = pd.DataFrame()
         
         # Preparar reglas para subir a base de datos
         if len(rules) > 0:
-            print("   Preparando reglas para base de datos...")
+            print("   Preparando reglas para la base de datos...")
             
-            for idx, rule in rules.head(100).iterrows():  # Limitar a top 100 reglas
+            for idx, rule in rules.head(100).iterrows():  # Limitar a top 100 reglas para almacenamiento
                 # Convertir listas a strings
                 antecedents_str = ','.join(map(str, rule['antecedents']))
                 consequents_str = ','.join(map(str, rule['consequents']))
@@ -398,9 +431,9 @@ if realizar_asociaciones:
                     'activa': True
                 })
             
-            print(f"✅ {len(reglas_asociacion)} reglas preparadas para subir")
+            print(f"✅ {len(reglas_asociacion)} reglas preparadas para subir.")
         else:
-            print("⚠️ No hay reglas de asociación para subir")
+            print("⚠️ No hay reglas de asociación para subir.")
             
     except Exception as e:
         print(f"❌ Error en análisis de reglas de asociación: {e}")
@@ -432,16 +465,17 @@ if realizar_clustering:
                 metadata = joblib.load(metadata_path)
                 print(f"✅ Modelo cargado - K={metadata.get('best_k', 'N/A')}, Score={metadata.get('silhouette_score', 'N/A'):.3f}")
             else:
-                print("✅ Modelo cargado (sin metadatos)")
+                print("✅ Modelo cargado (sin metadatos específicos).")
             
             # Calcular métricas RFM actualizadas para todos los clientes
-            print("   Calculando métricas RFM actualizadas...")
-            fecha_ref = df_ventas["fecha"].max() + pd.Timedelta(days=1)
+            print("   Calculando métricas RFM actualizadas para todos los clientes...")
+            # Usar la fecha fija de la demo para los cálculos RFM
+            fecha_ref = datetime(2011, 12, 1) + pd.Timedelta(days=1)
             
             rfm_actual = df_ventas.groupby("customer_id").agg({
                 "fecha": lambda x: (fecha_ref - x.max()).days,   # Recencia
                 "invoice": "nunique",                            # Frecuencia
-                "monto_venta": "sum"                            # Monto
+                "monto_venta": "sum"                             # Monto
             }).reset_index()
             
             rfm_actual.columns = ["customer_id", "recencia", "frecuencia", "monto"]
@@ -454,80 +488,69 @@ if realizar_clustering:
             rfm_actual['cluster'] = clusters
             
             # Calcular información adicional para Power BI
-            print("   Preparando datos para Power BI...")
+            print("   Preparando datos detallados por cliente para Power BI...")
             
-            # Obtener información del país de cada cliente
-            info_clientes = df_ventas.groupby('customer_id').agg({
-                'fecha': ['min', 'max'],  # Primera y última compra
-                'invoice': 'nunique',     # Número de órdenes
-                'cantidad': 'sum',        # Productos totales comprados
-                'monto_venta': ['sum', 'mean', 'std']  # Estadísticas de monto
-            }).reset_index()
-            
-            # Aplanar columnas multi-nivel
-            info_clientes.columns = ['customer_id', 'primera_compra', 'ultima_compra', 
-                                   'total_ordenes', 'total_productos', 'monto_total', 
-                                   'monto_promedio', 'monto_std']
+            # Obtener información adicional de cada cliente
+            info_clientes = df_ventas.groupby('customer_id').agg(
+                primera_compra=('fecha', 'min'),    # Primera compra
+                ultima_compra=('fecha', 'max'),     # Última compra
+                total_ordenes=('invoice', 'nunique'), # Número de órdenes
+                total_productos=('cantidad', 'sum'), # Productos totales comprados
+                monto_total=('monto_venta', 'sum'),
+                monto_promedio=('monto_venta', 'mean'),
+                monto_std=('monto_venta', 'std')
+            ).reset_index()
             
             # Calcular días desde primera compra
-           # Asegúrate que 'primera_compra' es datetime
-            info_clientes['primera_compra'] = pd.to_datetime(info_clientes['primera_compra'], errors='coerce')
-
-# Calcula los días correctamente
             info_clientes['dias_como_cliente'] = (fecha_ref - info_clientes['primera_compra']).dt.days
 
-            # Obtener país del cliente (tomar el más frecuente)
-            paises_clientes = df_ventas.groupby('customer_id').agg({
-                'fecha': 'max'  # Para join con dim_cliente
-            }).reset_index()
-            
-            # Obtener país desde dim_cliente
+            # Obtener país del cliente (desde dim_cliente)
             try:
                 df_paises = pd.read_sql("SELECT customer_id, pais FROM dim_cliente", engine)
                 info_clientes = info_clientes.merge(df_paises, on='customer_id', how='left')
-            except:
+            except Exception as e:
+                print(f"⚠️ No se pudo cargar dim_cliente para obtener países: {e}. País se establecerá como 'Unknown'.")
                 info_clientes['pais'] = 'Unknown'
             
             # Combinar con RFM y clusters
             rfm_completo = rfm_actual.merge(info_clientes, on='customer_id', how='left')
             
-            # Definir etiquetas de clusters más descriptivas
-            cluster_labels = {
-                0: "Clientes VIP",
-                1: "Clientes Regulares", 
-                2: "Clientes en Riesgo",
-                3: "Nuevos Clientes",
-                4: "Clientes Perdidos"
-            }
-            
-            # Calcular estadísticas por cluster para definir mejor las etiquetas
+            # Asignar etiquetas de clusters más inteligentes basadas en las métricas
             cluster_stats = rfm_actual.groupby('cluster').agg({
                 'recencia': 'mean',
                 'frecuencia': 'mean',
                 'monto': 'mean'
             }).round(2)
             
-            print("   Estadísticas por cluster:")
+            print("   Estadísticas promedio por cluster:")
             print(cluster_stats)
             
-            # Asignar etiquetas más inteligentes basadas en las métricas
-            def asignar_etiqueta_cluster(row):
-                if row['monto'] > rfm_actual['monto'].quantile(0.8) and row['frecuencia'] > rfm_actual['frecuencia'].median():
+            # Lógica mejorada para asignar etiquetas, basándose en la percentiles globales o en la interpretación de los clusters entrenados
+            def get_cluster_label(row_stats):
+                recency_threshold_high = rfm_actual['recencia'].quantile(0.75)
+                recency_threshold_low = rfm_actual['recencia'].quantile(0.25)
+                frequency_threshold_high = rfm_actual['frecuencia'].quantile(0.75)
+                monetary_threshold_high = rfm_actual['monto'].quantile(0.75)
+
+                if row_stats['monto'] > monetary_threshold_high and row_stats['frecuencia'] > frequency_threshold_high:
                     return "Clientes VIP"
-                elif row['recencia'] > rfm_actual['recencia'].quantile(0.8):
-                    return "Clientes Perdidos"
-                elif row['recencia'] < rfm_actual['recencia'].quantile(0.3) and row['frecuencia'] > rfm_actual['frecuencia'].median():
-                    return "Clientes Activos"
-                elif row['monto'] < rfm_actual['monto'].quantile(0.3):
+                elif row_stats['recencia'] > recency_threshold_high and row_stats['frecuencia'] < frequency_threshold_high:
+                    return "Clientes en Riesgo de Fuga"
+                elif row_stats['recencia'] <= recency_threshold_low and row_stats['frecuencia'] > rfm_actual['frecuencia'].median():
+                    return "Clientes Activos y Frecuentes"
+                elif row_stats['monto'] < rfm_actual['monto'].quantile(0.25):
                     return "Clientes de Bajo Valor"
+                elif row_stats['recencia'] > recency_threshold_high:
+                    return "Clientes Inactivos"
                 else:
                     return "Clientes Regulares"
+
+            cluster_labels_inteligentes = {
+                cluster_id: get_cluster_label(stats)
+                for cluster_id, stats in cluster_stats.iterrows()
+            }
             
-            cluster_labels_inteligentes = {}
-            for cluster_id in cluster_stats.index:
-                cluster_labels_inteligentes[cluster_id] = asignar_etiqueta_cluster(cluster_stats.loc[cluster_id])
-            
-            # Preparar datos para Supabase
+            # Preparar datos para subir a base de datos
             for idx, row in rfm_completo.iterrows():
                 cluster_id = int(row['cluster'])
                 cluster_label = cluster_labels_inteligentes.get(cluster_id, f"Cluster {cluster_id}")
@@ -539,8 +562,8 @@ if realizar_clustering:
                     'recencia': int(row['recencia']),
                     'frecuencia': int(row['frecuencia']),
                     'monto_total': round(float(row['monto']), 2),
-                    'primera_compra': row.get('primera_compra', fecha_ref).date(),
-                    'ultima_compra': row.get('ultima_compra', fecha_ref).date(),
+                    'primera_compra': row.get('primera_compra', pd.NaT).date() if pd.notna(row.get('primera_compra')) else None,
+                    'ultima_compra': row.get('ultima_compra', pd.NaT).date() if pd.notna(row.get('ultima_compra')) else None,
                     'total_ordenes': int(row.get('total_ordenes', 0)),
                     'total_productos': int(row.get('total_productos', 0)),
                     'monto_promedio': round(float(row.get('monto_promedio', 0)), 2),
@@ -550,45 +573,53 @@ if realizar_clustering:
                     'activo': True
                 })
             
-            print(f"✅ {len(segmentacion_clientes)} clientes segmentados")
+            print(f"✅ {len(segmentacion_clientes)} clientes segmentados y preparados para subir.")
             
             # Mostrar distribución de clusters
             distribucion = rfm_actual['cluster'].value_counts().sort_index()
-            print("\n   Distribución por cluster:")
+            print("\n   Distribución de clientes por cluster (con etiquetas):")
             for cluster_id, count in distribucion.items():
                 label = cluster_labels_inteligentes.get(cluster_id, f"Cluster {cluster_id}")
                 porcentaje = (count / len(rfm_actual)) * 100
-                print(f"   {label}: {count} clientes ({porcentaje:.1f}%)")
+                print(f"   {label} (ID: {cluster_id}): {count} clientes ({porcentaje:.1f}%)")
                 
         else:
-            print("❌ No se encontró modelo de clustering entrenado")
-            print("💡 Ejecuta primero el script de entrenamiento de clustering")
+            print("❌ No se encontró modelo de clustering entrenado ('kmeans_model_latest.pkl' o 'scaler_latest.pkl').")
+            print("💡 Por favor, ejecuta primero el script de entrenamiento de clustering para generar estos archivos.")
             
     except Exception as e:
-        print(f"❌ Error en segmentación de clientes: {e}")
+        print(f"❌ Error crítico en segmentación de clientes: {e}")
         segmentacion_clientes = []
 
 else:
     print("⏭️ Saltando segmentación de clientes...")
 
-# --- 5. SUBIR PREDICCIONES A SUPABASE ---
-print("\n--- Subiendo Datos a Supabase ---")
+# --- 5. SUBIR RESULTADOS A POSTGRESQL LOCAL ---
+print("\n--- Subiendo Resultados a PostgreSQL Local ---")
 
 # Subir predicciones de productos
 if realizar_productos and predicciones_productos:
-    df_pred_productos = pd.DataFrame(predicciones_productos)
-    df_pred_productos.to_sql('predicciones_mensuales', engine, if_exists='append', index=False)
-    print(f"✅ {len(df_pred_productos)} predicciones de productos insertadas para {N_MESES} meses.")
+    try:
+        df_pred_productos = pd.DataFrame(predicciones_productos)
+        df_pred_productos.to_sql('predicciones_mensuales', engine, if_exists='append', index=False)
+        print(f"✅ {len(df_pred_productos)} predicciones de productos insertadas para {N_MESES} meses.")
+    except Exception as e:
+        print(f"❌ Error al subir predicciones de productos: {e}")
+        print("💡 Asegúrate de que la tabla 'predicciones_mensuales' existe y tiene las columnas correctas.")
 elif realizar_productos:
-    print("⚠️ No se generaron predicciones de productos.")
+    print("⚠️ No se generaron predicciones de productos para subir.")
 
 # Subir predicciones de clientes
 if realizar_clientes and predicciones_clientes:
-    df_pred_clientes = pd.DataFrame(predicciones_clientes)
-    df_pred_clientes.to_sql('predicciones_montos_clientes', engine, if_exists='append', index=False)
-    print(f"✅ {len(df_pred_clientes)} predicciones de montos de clientes insertadas para {N_MESES} meses.")
+    try:
+        df_pred_clientes = pd.DataFrame(predicciones_clientes)
+        df_pred_clientes.to_sql('predicciones_montos_clientes', engine, if_exists='append', index=False)
+        print(f"✅ {len(df_pred_clientes)} predicciones de montos de clientes insertadas para {N_MESES} meses.")
+    except Exception as e:
+        print(f"❌ Error al subir predicciones de clientes: {e}")
+        print("💡 Asegúrate de que la tabla 'predicciones_montos_clientes' existe y tiene las columnas correctas.")
 elif realizar_clientes:
-    print("⚠️ No se generaron predicciones de clientes.")
+    print("⚠️ No se generaron predicciones de clientes para subir.")
 
 # Subir reglas de asociación
 if realizar_asociaciones and reglas_asociacion:
@@ -598,9 +629,9 @@ if realizar_asociaciones and reglas_asociacion:
         print(f"✅ {len(df_reglas)} reglas de asociación insertadas.")
     except Exception as e:
         print(f"❌ Error al subir reglas de asociación: {e}")
-        print("💡 Asegúrate de que la tabla 'reglas_asociacion' existe en la base de datos")
+        print("💡 Asegúrate de que la tabla 'reglas_asociacion' existe y tiene las columnas correctas.")
 elif realizar_asociaciones:
-    print("⚠️ No se generaron reglas de asociación.")
+    print("⚠️ No se generaron reglas de asociación para subir.")
 
 # Subir segmentación de clientes
 if realizar_clustering and segmentacion_clientes:
@@ -610,39 +641,36 @@ if realizar_clustering and segmentacion_clientes:
         print(f"✅ {len(df_segmentacion)} segmentaciones de clientes insertadas.")
         
         # Crear tabla resumen por cluster para Power BI
-        resumen_clusters = df_segmentacion.groupby(['cluster_id', 'cluster_nombre']).agg({
-            'customer_id': 'count',
-            'recencia': 'mean',
-            'frecuencia': 'mean', 
-            'monto_total': ['mean', 'sum'],
-            'total_ordenes': 'mean',
-            'dias_como_cliente': 'mean'
-        }).round(2)
+        resumen_clusters = df_segmentacion.groupby(['cluster_id', 'cluster_nombre']).agg(
+            total_clientes=('customer_id', 'count'),
+            recencia_promedio=('recencia', 'mean'),
+            frecuencia_promedio=('frecuencia', 'mean'),
+            monto_promedio=('monto_total', 'mean'),
+            monto_total_cluster=('monto_total', 'sum'),
+            ordenes_promedio=('total_ordenes', 'mean'),
+            dias_promedio=('dias_como_cliente', 'mean')
+        ).round(2).reset_index()
         
-        # Aplanar columnas multi-nivel
-        resumen_clusters.columns = ['total_clientes', 'recencia_promedio', 'frecuencia_promedio', 
-                                  'monto_promedio', 'monto_total_cluster', 'ordenes_promedio', 'dias_promedio']
-        resumen_clusters = resumen_clusters.reset_index()
         resumen_clusters['fecha_actualizacion'] = datetime.now().date()
         resumen_clusters['porcentaje_clientes'] = (resumen_clusters['total_clientes'] / len(df_segmentacion) * 100).round(2)
         
-        # Subir resumen de clusters
+        # Subir resumen de clusters (usar 'replace' para esta tabla, ya que es un resumen)
         resumen_clusters.to_sql('resumen_clusters', engine, if_exists='replace', index=False)
-        print(f"✅ Resumen de {len(resumen_clusters)} clusters creado para Power BI.")
+        print(f"✅ Resumen de {len(resumen_clusters)} clusters actualizado para Power BI.")
         
     except Exception as e:
-        print(f"❌ Error al subir segmentación de clientes: {e}")
-        print("💡 Asegúrate de que las tablas 'segmentacion_clientes' y 'resumen_clusters' existen")
+        print(f"❌ Error al subir segmentación o resumen de clientes: {e}")
+        print("💡 Asegúrate de que las tablas 'segmentacion_clientes' y 'resumen_clusters' existen y tienen las columnas correctas.")
 elif realizar_clustering:
-    print("⚠️ No se generaron segmentaciones de clientes.")
+    print("⚠️ No se generaron segmentaciones de clientes para subir.")
 
 # --- 6. CREAR VISTAS ADICIONALES PARA POWER BI ---
-print("\n--- Creando Vistas Adicionales para Power BI ---")
+print("\n--- Creando/Actualizando Vistas Adicionales para Power BI en PostgreSQL ---")
 
 try:
     with engine.begin() as conn:
         # Vista consolidada de métricas por cliente
-        vista_metricas_cliente = """
+        conn.execute(text("""
         CREATE OR REPLACE VIEW vista_metricas_clientes AS
         SELECT 
             s.customer_id,
@@ -653,208 +681,41 @@ try:
             s.total_ordenes,
             s.dias_como_cliente,
             s.pais,
-            d.pais as pais_dimension,
             CASE 
                 WHEN s.recencia <= 30 THEN 'Activo'
                 WHEN s.recencia <= 90 THEN 'En Riesgo'
                 ELSE 'Inactivo'
-            END as estado_actividad,
-            CASE 
+            END AS estado_actividad,
+            CASE
                 WHEN s.monto_total >= (SELECT PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY monto_total) FROM segmentacion_clientes) THEN 'Alto Valor'
-                WHEN s.monto_total >= (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY monto_total) FROM segmentacion_clientes) THEN 'Medio Valor'
+                WHEN s.monto_total >= (SELECT PERCENTILE_CONT(0.4) WITHIN GROUP (ORDER BY monto_total) FROM segmentacion_clientes) THEN 'Valor Medio'
                 ELSE 'Bajo Valor'
-            END as segmento_valor
-        FROM segmentacion_clientes s
-        LEFT JOIN dim_cliente d ON s.customer_id = d.customer_id
-        WHERE s.activo = true;
-        """
-        
-        conn.execute(text(vista_metricas_cliente))
-        print("✅ Vista 'vista_metricas_clientes' creada.")
-        
-        # Vista de evolución temporal de ventas por cluster
-        if realizar_clustering and segmentacion_clientes:
-            vista_evolucion_clusters = """
-            CREATE OR REPLACE VIEW vista_evolucion_clusters AS
-            SELECT 
-                DATE_TRUNC('month', f.fecha) as año_mes,
-                s.cluster_nombre,
-                s.cluster_id,
-                COUNT(DISTINCT f.customer_id) as clientes_activos,
-                SUM(f.cantidad * f.precio_unitario) as ventas_totales,
-                AVG(f.cantidad * f.precio_unitario) as venta_promedio,
-                COUNT(f.invoice) as total_transacciones
-            FROM fact_ventas f
-            JOIN segmentacion_clientes s ON f.customer_id = s.customer_id
-            WHERE s.activo = true
-            GROUP BY DATE_TRUNC('month', f.fecha), s.cluster_nombre, s.cluster_id
-            ORDER BY año_mes DESC;
-            """
-            
-            conn.execute(text(vista_evolucion_clusters))
-            print("✅ Vista 'vista_evolucion_clusters' creada.")
-        
-        # Vista de productos más vendidos por cluster
-        if realizar_clustering and segmentacion_clientes:
-            vista_productos_cluster = """
-            CREATE OR REPLACE VIEW vista_productos_por_cluster AS
-            SELECT 
-                s.cluster_nombre,
-                s.cluster_id,
-                f.stockcode,
-                p.descripcion,
-                SUM(f.cantidad) as cantidad_total,
-                SUM(f.cantidad * f.precio_unitario) as ventas_totales,
-                COUNT(DISTINCT f.customer_id) as clientes_compradores,
-                AVG(f.precio_unitario) as precio_promedio
-            FROM fact_ventas f
-            JOIN segmentacion_clientes s ON f.customer_id = s.customer_id
-            JOIN dim_producto p ON f.stockcode = p.stockcode
-            WHERE s.activo = true
-            GROUP BY s.cluster_nombre, s.cluster_id, f.stockcode, p.descripcion
-            ORDER BY s.cluster_id, cantidad_total DESC;
-            """
-            
-            conn.execute(text(vista_productos_cluster))
-            print("✅ Vista 'vista_productos_por_cluster' creada.")
-        
-        # Vista consolidada de predicciones vs reales
-        if realizar_productos:
-            vista_predicciones_productos = """
-            CREATE OR REPLACE VIEW vista_predicciones_vs_reales AS
-            SELECT 
-                p.stockcode,
-                pr.descripcion,
-                p.fecha_prediccion,
-                p.cantidad_predicha,
-                COALESCE(SUM(f.cantidad), 0) as cantidad_real,
-                ABS(p.cantidad_predicha - COALESCE(SUM(f.cantidad), 0)) as diferencia_absoluta,
-                CASE 
-                    WHEN COALESCE(SUM(f.cantidad), 0) > 0 THEN 
-                        ABS(p.cantidad_predicha - COALESCE(SUM(f.cantidad), 0)) / COALESCE(SUM(f.cantidad), 1) * 100
-                    ELSE NULL
-                END as error_porcentual
-            FROM predicciones_mensuales p
-            LEFT JOIN dim_producto pr ON p.stockcode = pr.stockcode
-            LEFT JOIN fact_ventas f ON p.stockcode = f.stockcode 
-                AND DATE_TRUNC('month', f.fecha) = DATE_TRUNC('month', p.fecha_prediccion)
-            GROUP BY p.stockcode, pr.descripcion, p.fecha_prediccion, p.cantidad_predicha;
-            """
-            
-            conn.execute(text(vista_predicciones_productos))
-            print("✅ Vista 'vista_predicciones_vs_reales' creada.")
+            END AS etiqueta_valor_monto
+        FROM segmentacion_clientes s;
+        """))
+        print("✅ Vista 'vista_metricas_clientes' creada/actualizada.")
+
+        # Vista de las principales reglas de asociación (ejemplo, top 100)
+        conn.execute(text("""
+        CREATE OR REPLACE VIEW vista_top_reglas_asociacion AS
+        SELECT
+            regla_id,
+            antecedentes,
+            consecuentes,
+            soporte,
+            confianza,
+            lift,
+            fecha_generacion
+        FROM reglas_asociacion
+        WHERE activa = TRUE
+        ORDER BY lift DESC, confianza DESC
+        LIMIT 100;
+        """))
+        print("✅ Vista 'vista_top_reglas_asociacion' creada/actualizada.")
 
 except Exception as e:
-    print(f"⚠️ Error creando vistas adicionales: {e}")
+    print(f"❌ Error al crear/actualizar vistas para Power BI: {e}")
+    print("💡 Asegúrate de tener los permisos necesarios para crear/reemplazar vistas en tu base de datos.")
 
-# --- 7. GENERAR TABLA DE KPIS PARA POWER BI ---
-print("\n--- Generando KPIs para Power BI ---")
-
-try:
-    kpis_data = []
-    fecha_actual = datetime.now().date()
-    
-    # KPIs generales
-    total_clientes = len(df_ventas['customer_id'].unique())
-    total_productos = len(df_ventas['stockcode'].unique())
-    total_ventas = df_ventas['monto_venta'].sum()
-    
-    kpis_data.extend([
-        {'kpi_nombre': 'Total Clientes', 'valor': total_clientes, 'categoria': 'General', 'fecha_actualizacion': fecha_actual},
-        {'kpi_nombre': 'Total Productos', 'valor': total_productos, 'categoria': 'General', 'fecha_actualizacion': fecha_actual},
-        {'kpi_nombre': 'Ventas Totales', 'valor': round(total_ventas, 2), 'categoria': 'General', 'fecha_actualizacion': fecha_actual}
-    ])
-    
-    # KPIs de predicciones
-    if predicciones_productos:
-        total_pred_productos = len(predicciones_productos)
-        productos_unicos_pred = len(set([p['stockcode'] for p in predicciones_productos]))
-        kpis_data.extend([
-            {'kpi_nombre': 'Predicciones Productos', 'valor': total_pred_productos, 'categoria': 'Predicciones', 'fecha_actualizacion': fecha_actual},
-            {'kpi_nombre': 'Productos con Predicción', 'valor': productos_unicos_pred, 'categoria': 'Predicciones', 'fecha_actualizacion': fecha_actual}
-        ])
-    
-    if predicciones_clientes:
-        total_pred_clientes = len(predicciones_clientes)
-        clientes_unicos_pred = len(set([p['client_id'] for p in predicciones_clientes]))
-        kpis_data.extend([
-            {'kpi_nombre': 'Predicciones Clientes', 'valor': total_pred_clientes, 'categoria': 'Predicciones', 'fecha_actualizacion': fecha_actual},
-            {'kpi_nombre': 'Clientes con Predicción', 'valor': clientes_unicos_pred, 'categoria': 'Predicciones', 'fecha_actualizacion': fecha_actual}
-        ])
-    
-    # KPIs de clustering
-    if segmentacion_clientes:
-        total_segmentados = len(segmentacion_clientes)
-        clusters_unicos = len(set([s['cluster_id'] for s in segmentacion_clientes]))
-        kpis_data.extend([
-            {'kpi_nombre': 'Clientes Segmentados', 'valor': total_segmentados, 'categoria': 'Clustering', 'fecha_actualizacion': fecha_actual},
-            {'kpi_nombre': 'Número de Clusters', 'valor': clusters_unicos, 'categoria': 'Clustering', 'fecha_actualizacion': fecha_actual}
-        ])
-    
-    # KPIs de reglas de asociación
-    if reglas_asociacion:
-        total_reglas = len(reglas_asociacion)
-        kpis_data.append({'kpi_nombre': 'Reglas de Asociación', 'valor': total_reglas, 'categoria': 'Recomendaciones', 'fecha_actualizacion': fecha_actual})
-    
-    # Subir KPIs a Supabase
-    if kpis_data:
-        df_kpis = pd.DataFrame(kpis_data)
-        
-        # Limpiar KPIs anteriores del día
-        with engine.begin() as conn:
-            conn.execute(text("DELETE FROM kpis_dashboard WHERE fecha_actualizacion = :fecha"), {"fecha": fecha_actual})
-        
-        df_kpis.to_sql('kpis_dashboard', engine, if_exists='append', index=False)
-        print(f"✅ {len(df_kpis)} KPIs actualizados para Power BI.")
-
-except Exception as e:
-    print(f"⚠️ Error generando KPIs: {e}")
-
-# --- 8. RESUMEN FINAL ---
-print(f"\n=== RESUMEN FINAL ===")
-print(f"📦 Predicciones de productos: {len(predicciones_productos)}")
-print(f"🔢 Productos únicos con predicciones: {len(set([p['stockcode'] for p in predicciones_productos])) if predicciones_productos else 0}")
-print(f"👥 Predicciones de clientes: {len(predicciones_clientes)}")
-print(f"🔢 Clientes únicos con predicciones: {len(set([p['client_id'] for p in predicciones_clientes])) if predicciones_clientes else 0}")
-print(f"🔗 Reglas de asociación: {len(reglas_asociacion)}")
-print(f"🎯 Clientes segmentados: {len(segmentacion_clientes)}")
-print(f"📅 Meses predichos: {N_MESES}")
-print("🎉 Proceso completado exitosamente!")
-
-# Mostrar algunas reglas de asociación si se generaron
-if reglas_asociacion:
-    print(f"\n=== TOP 5 REGLAS DE ASOCIACIÓN ===")
-    for i, regla in enumerate(reglas_asociacion[:5]):
-        print(f"{i+1}. Si compra [{regla['antecedentes']}] → entonces [{regla['consecuentes']}]")
-        print(f"   Confianza: {regla['confianza']:.3f} | Lift: {regla['lift']:.3f}")
-
-# Mostrar distribución de clusters si se generaron
-if segmentacion_clientes:
-    print(f"\n=== DISTRIBUCIÓN DE CLUSTERS ===")
-    clusters_dist = {}
-    for cliente in segmentacion_clientes:
-        cluster_nombre = cliente['cluster_nombre']
-        if cluster_nombre not in clusters_dist:
-            clusters_dist[cluster_nombre] = 0
-        clusters_dist[cluster_nombre] += 1
-    
-    total_clientes_seg = len(segmentacion_clientes)
-    for cluster_nombre, count in clusters_dist.items():
-        porcentaje = (count / total_clientes_seg) * 100
-        print(f"{cluster_nombre}: {count} clientes ({porcentaje:.1f}%)")
-
-# Información para conectar Power BI
-print(f"\n=== INFORMACIÓN PARA POWER BI ===")
-print("📊 Tablas principales disponibles:")
-print("   • predicciones_mensuales - Predicciones de productos")
-print("   • predicciones_montos_clientes - Predicciones de clientes")
-print("   • reglas_asociacion - Reglas de recomendación")
-print("   • segmentacion_clientes - Segmentación de clientes")
-print("   • resumen_clusters - Resumen estadístico por cluster")
-print("   • kpis_dashboard - KPIs principales")
-print("\n📈 Vistas para análisis avanzado:")
-print("   • vista_metricas_clientes - Métricas consolidadas")
-print("   • vista_evolucion_clusters - Evolución temporal por cluster")
-print("   • vista_productos_por_cluster - Productos preferidos por segmento")
-print("   • vista_predicciones_vs_reales - Comparación predicciones vs reales")
-print("\n🔗 Usa estas tablas y vistas en Power BI para crear dashboards interactivos")
+print("\n=== PROCESO COMPLETADO ===")
+print("Todas las operaciones seleccionadas han finalizado.")

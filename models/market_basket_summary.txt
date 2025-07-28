@@ -1,5 +1,5 @@
 === RESUMEN DEL MODELO DE REGLAS DE ASOCIACIÓN ===
-Fecha de entrenamiento: 2025-07-27 21:59:08
+Fecha de entrenamiento: 2025-07-28 12:26:58
 Parámetros: min_support=0.01, min_lift=1.0
 Transacciones procesadas: 33995
 Itemsets frecuentes: 997
@@ -8,72 +8,72 @@ Reglas de asociación: 1036
 TOP 10 REGLAS DE ASOCIACIÓN:
 ==================================================
 
-Regla 984:
-  Si compra: ['22746']
-  Entonces compra: ['22745', '22748']
-  Confianza: 0.770
-  Lift: 55.427
-  Soporte: 0.010
-
-Regla 979:
-  Si compra: ['22745', '22748']
-  Entonces compra: ['22746']
-  Confianza: 0.750
-  Lift: 55.427
-  Soporte: 0.010
-
-Regla 981:
-  Si compra: ['22746', '22748']
-  Entonces compra: ['22745']
-  Confianza: 0.868
-  Lift: 53.050
-  Soporte: 0.010
-
-Regla 982:
-  Si compra: ['22745']
-  Entonces compra: ['22746', '22748']
-  Confianza: 0.637
-  Lift: 53.050
-  Soporte: 0.010
+Regla 983:
+   Si compra: ['22746']
+   Entonces compra: ['22748', '22745']
+   Confianza: 0.770
+   Lift: 55.427
+   Soporte: 0.010
 
 Regla 980:
-  Si compra: ['22745', '22746']
-  Entonces compra: ['22748']
-  Confianza: 0.927
-  Lift: 51.142
-  Soporte: 0.010
+   Si compra: ['22748', '22745']
+   Entonces compra: ['22746']
+   Confianza: 0.750
+   Lift: 55.427
+   Soporte: 0.010
 
-Regla 983:
-  Si compra: ['22748']
-  Entonces compra: ['22745', '22746']
-  Confianza: 0.575
-  Lift: 51.142
-  Soporte: 0.010
+Regla 979:
+   Si compra: ['22748', '22746']
+   Entonces compra: ['22745']
+   Confianza: 0.868
+   Lift: 53.050
+   Soporte: 0.010
 
-Regla 518:
-  Si compra: ['22746']
-  Entonces compra: ['22745']
-  Confianza: 0.830
-  Lift: 50.775
-  Soporte: 0.011
+Regla 984:
+   Si compra: ['22745']
+   Entonces compra: ['22748', '22746']
+   Confianza: 0.637
+   Lift: 53.050
+   Soporte: 0.010
+
+Regla 981:
+   Si compra: ['22746', '22745']
+   Entonces compra: ['22748']
+   Confianza: 0.927
+   Lift: 51.142
+   Soporte: 0.010
+
+Regla 982:
+   Si compra: ['22748']
+   Entonces compra: ['22746', '22745']
+   Confianza: 0.575
+   Lift: 51.142
+   Soporte: 0.010
 
 Regla 517:
-  Si compra: ['22745']
-  Entonces compra: ['22746']
-  Confianza: 0.687
-  Lift: 50.775
-  Soporte: 0.011
+   Si compra: ['22746']
+   Entonces compra: ['22745']
+   Confianza: 0.830
+   Lift: 50.775
+   Soporte: 0.011
 
-Regla 521:
-  Si compra: ['22746']
-  Entonces compra: ['22748']
-  Confianza: 0.887
-  Lift: 48.948
-  Soporte: 0.012
+Regla 518:
+   Si compra: ['22745']
+   Entonces compra: ['22746']
+   Confianza: 0.687
+   Lift: 50.775
+   Soporte: 0.011
 
 Regla 522:
-  Si compra: ['22748']
-  Entonces compra: ['22746']
-  Confianza: 0.662
-  Lift: 48.948
-  Soporte: 0.012
+   Si compra: ['22746']
+   Entonces compra: ['22748']
+   Confianza: 0.887
+   Lift: 48.948
+   Soporte: 0.012
+
+Regla 521:
+   Si compra: ['22748']
+   Entonces compra: ['22746']
+   Confianza: 0.662
+   Lift: 48.948
+   Soporte: 0.012
