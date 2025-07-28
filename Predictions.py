@@ -12,7 +12,7 @@ from mlxtend.preprocessing import TransactionEncoder
 N_MESES = 12  # Número de meses hacia el futuro que deseas predecir
 CARPETA_MODELOS = 'models'  # Carpeta donde están los modelos
 MIN_CLIENTES_PREDICCION = 5  # Mínimo número de clientes a predecir
-MIN_PRODUCTOS_PREDICCION = 10  # Mínimo número de productos a predecir
+MIN_PRODUCTOS_PREDICCION = 5  # Mínimo número de productos a predecir
 
 # Parámetros para reglas de asociación
 MIN_SUPPORT = 0.01  # Soporte mínimo para itemsets frecuentes
