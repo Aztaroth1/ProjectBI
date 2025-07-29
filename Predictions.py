@@ -152,7 +152,7 @@ if realizar_productos:
 
     # Primero: Procesar productos con modelos ARIMA entrenados
     for archivo in os.listdir(CARPETA_MODELOS):
-        if archivo.startswith('arima_producto_') and archivo.endswith('.pkl'):
+        if archivo.startswith('arima_model_') and archivo.endswith('.pkl'):
             stockcode = archivo.split('_')[-1].replace('.pkl', '')
             modelo_path = os.path.join(CARPETA_MODELOS, archivo)
             
@@ -597,17 +597,37 @@ else:
 # --- 5. SUBIR RESULTADOS A POSTGRESQL LOCAL ---
 print("\n--- Subiendo Resultados a PostgreSQL Local ---")
 
-# Subir predicciones de productos
-if realizar_productos and predicciones_productos:
-    try:
-        df_pred_productos = pd.DataFrame(predicciones_productos)
-        df_pred_productos.to_sql('predicciones_mensuales', engine, if_exists='append', index=False)
-        print(f"✅ {len(df_pred_productos)} predicciones de productos insertadas para {N_MESES} meses.")
-    except Exception as e:
-        print(f"❌ Error al subir predicciones de productos: {e}")
-        print("💡 Asegúrate de que la tabla 'predicciones_mensuales' existe y tiene las columnas correctas.")
-elif realizar_productos:
-    print("⚠️ No se generaron predicciones de productos para subir.")
+
+
+if realizar_productos:
+    # Filtrar predicciones antes de subir
+    df_pred_productos = pd.DataFrame(predicciones_productos)
+    if not df_pred_productos.empty:
+        df_pred_productos = df_pred_productos[
+            (df_pred_productos['cantidad_predicha'] >= 0) &
+            (df_pred_productos['cantidad_predicha'] <= MAX_CANTIDAD)
+        ]
+
+        # Opcional: Reemplazar valores fuera de rango por la media histórica o por 0
+        df_pred_productos.loc[df_pred_productos['cantidad_predicha'] > MAX_CANTIDAD, 'cantidad_predicha'] = 0
+
+        for idx, row in df_pred_productos[df_pred_productos['cantidad_predicha'] > MAX_CANTIDAD].iterrows():
+            stockcode = row['stockcode']
+            # Calcular la media histórica del producto
+            media_historica = df_mensual_productos[df_mensual_productos['stockcode'] == stockcode]['cantidad'].mean()
+            # Si la media no es válida, usa 0
+            if not np.isfinite(media_historica) or media_historica < 0:
+                media_historica = 0
+            df_pred_productos.at[idx, 'cantidad_predicha'] = round(media_historica)
+
+        try:
+            df_pred_productos.to_sql('predicciones_mensuales', engine, if_exists='append', index=False)
+            print(f"✅ {len(df_pred_productos)} predicciones de productos insertadas para {N_MESES} meses.")
+        except Exception as e:
+            print(f"❌ Error al subir predicciones de productos: {e}")
+            print("💡 Asegúrate de que la tabla 'predicciones_mensuales' existe y tiene las columnas correctas.")
+    else:
+        print("⚠️ No se generaron predicciones de productos para subir.")
 
 # Subir predicciones de clientes
 if realizar_clientes and predicciones_clientes:
