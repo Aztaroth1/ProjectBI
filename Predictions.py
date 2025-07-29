@@ -130,10 +130,20 @@ with engine.begin() as conn:
     
     if realizar_asociaciones:
         try:
-            result = conn.execute(text("DELETE FROM reglas_asociacion WHERE fecha_generacion >= :fecha"), {"fecha": fecha_referencia_demo})
-            print(f"🧹 Eliminadas {result.rowcount} reglas de asociación anteriores.")
+            # Primero: Eliminar la vista dependiente si existe (con CASCADE para mayor seguridad si hubiera más dependencias)
+            conn.execute(text("DROP VIEW IF EXISTS vista_top_reglas_asociacion CASCADE;"))
+            print("🧹 Eliminada la vista 'vista_top_reglas_asociacion' si existía.")
+            
+            # Segundo: Eliminar la tabla de reglas de asociación si existe (para un reemplazo limpio con to_sql)
+            conn.execute(text("DROP TABLE IF EXISTS reglas_asociacion;")) # CAMBIO CLAVE AQUÍ
+            print("🧹 Eliminada la tabla 'reglas_asociacion' si existía.")
+            
+            # El DELETE FROM ya no es necesario aquí si usas if_exists='replace' en to_sql,
+            # ya que el DROP TABLE lo manejará. Si no estás usando 'replace', entonces mantendrías el DELETE.
+            # Pero para el flujo que hemos discutido, el DROP TABLE es lo correcto.
+            
         except Exception as e:
-            print(f"ℹ️ No se pudo limpiar 'reglas_asociacion': {e}. Asegúrate de que la tabla existe.")
+            print(f"ℹ️ No se pudo limpiar 'reglas_asociacion' o su vista: {e}. Asegúrate de que tengas permisos.")
     
     if realizar_clustering:
         try:
@@ -346,13 +356,16 @@ else:
     print("⏭️ Saltando predicciones de clientes...")
 
 # --- 3. ANÁLISIS DE REGLAS DE ASOCIACIÓN ---
-reglas_asociacion = []
+reglas_asociacion = [] # Cambiamos el nombre para evitar confusión
 
 if realizar_asociaciones:
     print("\n--- Procesando Reglas de Asociación ---")
     
     try:
-        # Cargar modelo de reglas de asociación si existe
+        # Cargar información de productos para descripciones (Asegúrate de que 'descripcion' esté disponible)
+        df_productos = pd.read_sql("SELECT stockcode, descripcion FROM dim_producto", engine)
+        product_description_map = df_productos.set_index('stockcode')['descripcion'].to_dict()
+
         modelo_path = os.path.join(CARPETA_MODELOS, 'market_basket_model.pkl')
         
         if os.path.exists(modelo_path):
@@ -363,72 +376,38 @@ if realizar_asociaciones:
             
         else:
             print("🔧 Generando nuevas reglas de asociación (no se encontró modelo pre-entrenado)...")
-            
-            # Cargar información de productos para descripciones
-            try:
-                df_productos = pd.read_sql("SELECT stockcode, descripcion FROM dim_producto", engine)
-            except Exception as e:
-                print(f"⚠️ No se pudo cargar dim_producto: {e}. Usando stockcode como descripción.")
-                df_productos = pd.DataFrame({'stockcode': df_ventas['stockcode'].unique(),
-                                             'descripcion': df_ventas['stockcode'].unique()})
-            
-            # Preparar transacciones
-            print("   Preparando transacciones...")
-            transactions = df_ventas.groupby('invoice')['stockcode'].apply(list).tolist()
-            transactions_filtered = [trans for trans in transactions if len(trans) >= 2]
-            
-            print(f"   Transacciones con 2+ productos: {len(transactions_filtered)}")
-            
-            if len(transactions_filtered) < 100:
-                print("⚠️ Muy pocas transacciones para análisis de asociación. Se necesitan al menos 100.")
-                rules = pd.DataFrame()
-            else:
-                # Codificar transacciones
-                te = TransactionEncoder()
-                te_ary = te.fit_transform(transactions_filtered)
-                basket_sets = pd.DataFrame(te_ary, columns=te.columns_)
-                
-                # Encontrar itemsets frecuentes
-                print("   Encontrando itemsets frecuentes...")
-                frequent_itemsets = apriori(basket_sets, min_support=MIN_SUPPORT, use_colnames=True)
-                
-                if len(frequent_itemsets) > 1:
-                    # Generar reglas de asociación
-                    print("   Generando reglas de asociación...")
-                    rules = association_rules(frequent_itemsets, metric="lift", min_threshold=MIN_LIFT)
-                    
-                    if len(rules) > 0:
-                        # Convertir frozensets a listas
-                        rules['antecedents'] = rules['antecedents'].apply(lambda x: list(x))
-                        rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
-                        rules = rules.sort_values(['lift', 'confidence'], ascending=[False, False])
-                        
-                        print(f"✅ {len(rules)} reglas de asociación generadas.")
-                    else:
-                        print("⚠️ No se generaron reglas de asociación con los parámetros actuales.")
-                        rules = pd.DataFrame()
-                else:
-                    print("⚠️ No hay suficientes itemsets frecuentes para generar reglas con el min_support definido.")
-                    rules = pd.DataFrame()
-        
+            # ... (tu código para generar rules usando apriori y association_rules) ...
+            # Asegúrate de que 'rules' sea un DataFrame de pandas aquí
+
         # Preparar reglas para subir a base de datos
         if len(rules) > 0:
-            print("   Preparando reglas para la base de datos...")
+            print("    Preparando reglas para la base de datos...")
             
-            for idx, rule in rules.head(100).iterrows():  # Limitar a top 100 reglas para almacenamiento
-                # Convertir listas a strings
-                antecedents_str = ','.join(map(str, rule['antecedents']))
-                consequents_str = ','.join(map(str, rule['consequents']))
+            # Filtrar solo reglas con un antecedente y un consecuente para simplificar el Power BI
+            # O manejar como listas si quieres mostrarlas en Power BI, pero la relación con dim_producto será difícil.
+            # Para la plantilla de Power BI, lo más fácil es 1 a 1.
+            filtered_rules = rules[
+                (rules['antecedents'].apply(lambda x: len(x) == 1)) & 
+                (rules['consequents'].apply(lambda x: len(x) == 1))
+            ]
+
+            # Tomar un número razonable de reglas, por ejemplo, las 500 más fuertes por lift y confianza
+            filtered_rules = filtered_rules.sort_values(['lift', 'confidence'], ascending=[False, False]).head(500)
+            regla_id_counter = 1
+            for idx, rule in filtered_rules.iterrows():
+                antecedent_id = list(rule['antecedents'])[0]
+                consequent_id = list(rule['consequents'])[0]
                 
                 reglas_asociacion.append({
-                    'regla_id': idx + 1,
-                    'antecedentes': antecedents_str,
-                    'consecuentes': consequents_str,
-                    'soporte': round(float(rule['support']), 4),
-                    'confianza': round(float(rule['confidence']), 4),
+                    'regla_id': regla_id_counter,
+                    'antecedent_product_id': antecedent_id,
+                    'antecedent_product_description': product_description_map.get(antecedent_id, f"Desconocido ({antecedent_id})"),
+                    'consequent_product_id': consequent_id,
+                    'consequent_product_description': product_description_map.get(consequent_id, f"Desconocido ({consequent_id})"),
+                    'support': round(float(rule['support']), 4),
+                    'confidence': round(float(rule['confidence']), 4),
                     'lift': round(float(rule['lift']), 4),
-                    'fecha_generacion': datetime.now().date(),
-                    'activa': True
+                    'fecha_generacion': datetime.now().date()
                 })
             
             print(f"✅ {len(reglas_asociacion)} reglas preparadas para subir.")
@@ -437,7 +416,7 @@ if realizar_asociaciones:
             
     except Exception as e:
         print(f"❌ Error en análisis de reglas de asociación: {e}")
-        reglas_asociacion = []
+        reglas_asociacion_para_db = []
 
 else:
     print("⏭️ Saltando análisis de reglas de asociación...")
@@ -644,13 +623,15 @@ elif realizar_clientes:
 # Subir reglas de asociación
 if realizar_asociaciones and reglas_asociacion:
     try:
-        df_reglas = pd.DataFrame(reglas_asociacion)
-        df_reglas.to_sql('reglas_asociacion', engine, if_exists='append', index=False)
-        print(f"✅ {len(df_reglas)} reglas de asociación insertadas.")
+        df_reglas_asociacion = pd.DataFrame(reglas_asociacion)
+        # Asegúrate de que las columnas coincidan con la tabla de DB.
+        # Creamos la tabla si no existe o la sobrescribimos para cada ejecución.
+        df_reglas_asociacion.to_sql('reglas_asociacion', engine, if_exists='replace', index=False) 
+        print(f"✅ {len(df_reglas_asociacion)} reglas de asociación insertadas/actualizadas.")
     except Exception as e:
         print(f"❌ Error al subir reglas de asociación: {e}")
-        print("💡 Asegúrate de que la tabla 'reglas_asociacion' existe y tiene las columnas correctas.")
-elif realizar_asociaciones:
+        print("💡 Asegúrate de que la tabla 'reglas_asociacion' pueda ser creada/sobrescrita y tenga las columnas correctas.")
+else:
     print("⚠️ No se generaron reglas de asociación para subir.")
 
 # Subir segmentación de clientes
@@ -717,19 +698,21 @@ try:
 
         # Vista de las principales reglas de asociación (ejemplo, top 100)
         conn.execute(text("""
-        CREATE OR REPLACE VIEW vista_top_reglas_asociacion AS
-        SELECT
-            regla_id,
-            antecedentes,
-            consecuentes,
-            soporte,
-            confianza,
-            lift,
-            fecha_generacion
-        FROM reglas_asociacion
-        WHERE activa = TRUE
-        ORDER BY lift DESC, confianza DESC
-        LIMIT 100;
+         CREATE OR REPLACE VIEW vista_top_reglas_asociacion AS
+            SELECT
+                regla_id,                         -- Asegúrate de que exista en la tabla
+                antecedent_product_id,
+                antecedent_product_description,   -- Nuevo campo
+                consequent_product_id,
+                consequent_product_description,   -- Nuevo campo
+                support,
+                confidence,
+                lift,
+                fecha_generacion
+            FROM reglas_asociacion
+            -- WHERE activa = TRUE -- Solo si has añadido y gestionas la columna 'activa'
+            ORDER BY lift DESC, confidence DESC
+            LIMIT 100;
         """))
         print("✅ Vista 'vista_top_reglas_asociacion' creada/actualizada.")
 
