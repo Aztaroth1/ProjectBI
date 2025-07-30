@@ -41,6 +41,8 @@ try:
     df_ventas['monto_venta'] = df_ventas['cantidad'] * df_ventas['precio_unitario']
     df_ventas['año_mes'] = df_ventas['fecha'].dt.to_period('M')
 
+    ultima_fecha_historica_global = df_ventas['fecha'].max()
+    fecha_inicio_predicciones_global = (ultima_fecha_historica_global + relativedelta(months=1)).replace(day=1)
     print(f"✅ Datos de ventas cargados: {len(df_ventas)} registros")
 
     # Agrupación mensual por producto
@@ -111,20 +113,29 @@ input("\nPresiona Enter para continuar...")
 # --- LIMPIAR DATOS FUTUROS (AUTOMÁTICO) ---
 print("\n--- Limpiando Predicciones Futuras en PostgreSQL Local ---")
 # Usar la fecha fija para la demo
-fecha_referencia_demo = datetime(2011, 12, 1).date()
+ultima_fecha_historica = df_ventas['fecha'].max().date()
+# La predicción debe comenzar DESPUÉS de la última fecha histórica.
+# Si quieres borrar todo lo que está más allá de tu último dato histórico, usa esa fecha.
+# Si quieres borrar TODAS las predicciones existentes para regenerarlas, puedes usar una fecha muy antigua.
+# Para este escenario, queremos borrar las predicciones que no corresponden al periodo futuro real.
+# Vamos a borrar todo lo que sea posterior o igual al inicio del primer mes que deberías predecir.
+fecha_inicio_prediccion_deseada = '2009-01-01'  # Cambia esto si quieres un inicio diferente
+
 
 with engine.begin() as conn:
     if realizar_productos:
         try:
-            result = conn.execute(text("DELETE FROM predicciones_mensuales WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_referencia_demo})
-            print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de productos.")
+            # Eliminar todas las predicciones a partir del inicio del primer mes de predicción
+            result = conn.execute(text("DELETE FROM predicciones_mensuales WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_inicio_prediccion_deseada})
+            print(f"🧹 Eliminadas {result.rowcount} predicciones de productos a partir de {fecha_inicio_prediccion_deseada}.")
         except Exception as e:
             print(f"❌ Error al limpiar 'predicciones_mensuales': {e}. Asegúrate de que la tabla existe.")
     
     if realizar_clientes:
         try:
-            result = conn.execute(text("DELETE FROM predicciones_montos_clientes WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_referencia_demo})
-            print(f"🧹 Eliminadas {result.rowcount} predicciones futuras de clientes.")
+            # Eliminar todas las predicciones a partir del inicio del primer mes de predicción
+            result = conn.execute(text("DELETE FROM predicciones_montos_clientes WHERE fecha_prediccion >= :fecha"), {"fecha": fecha_inicio_prediccion_deseada})
+            print(f"🧹 Eliminadas {result.rowcount} predicciones de clientes a partir de {fecha_inicio_prediccion_deseada}.")
         except Exception as e:
             print(f"❌ Error al limpiar 'predicciones_montos_clientes': {e}. Asegúrate de que la tabla existe.")
     
@@ -392,7 +403,7 @@ if realizar_asociaciones:
             ]
 
             # Tomar un número razonable de reglas, por ejemplo, las 500 más fuertes por lift y confianza
-            filtered_rules = filtered_rules.sort_values(['lift', 'confidence'], ascending=[False, False]).head(500)
+            filtered_rules = filtered_rules.sort_values(['lift', 'confidence'], ascending=[False, False]).head(2000)
             regla_id_counter = 1
             for idx, rule in filtered_rules.iterrows():
                 antecedent_id = list(rule['antecedents'])[0]
@@ -579,6 +590,7 @@ print("\n--- Subiendo Resultados a PostgreSQL Local ---")
 
 
 if realizar_productos:
+    MAX_CANTIDAD = 1_00000  # Límite razonable para cantidades predichas
     # Filtrar predicciones antes de subir
     df_pred_productos = pd.DataFrame(predicciones_productos)
     if not df_pred_productos.empty:
@@ -712,7 +724,7 @@ try:
             FROM reglas_asociacion
             -- WHERE activa = TRUE -- Solo si has añadido y gestionas la columna 'activa'
             ORDER BY lift DESC, confidence DESC
-            LIMIT 100;
+            LIMIT 2000;
         """))
         print("✅ Vista 'vista_top_reglas_asociacion' creada/actualizada.")
 
